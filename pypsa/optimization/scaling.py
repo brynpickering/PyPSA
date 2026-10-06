@@ -22,13 +22,14 @@ ColumnClass = Literal["energy", "cost", "none"]
 # magnitude window every scaled quantity is pulled into, per category
 WINDOW: dict[str, tuple[float, float]] = {
     "matrix": (1e-3, 1e6),
-    "cost": (1e-2, 1e6),
+    "cost": (1e-5, 1e6),
     "bound": (1e-2, 1e6),
     "rhs": (1e-2, 1e6),
 }
 WEIGHT: dict[str, float] = {"matrix": 2.0, "cost": 1.0, "bound": 1.0, "rhs": 1.0}
 VIOL_WEIGHT = 10.0
 EPS_ONE = 1e-3
+ZERO_TOL = 1e-9
 G_MAX = 40
 
 _DIMENSIONLESS_SUFFIXES = (
@@ -125,8 +126,8 @@ def _group_ranges(m: Model, classes: dict[str, ColumnClass]) -> Ranges:
     out: Ranges = {}
     for name, con in m.constraints.items():
         d = con.data
-        live = ((d["labels"] != -1) & (d["vars"] != -1) & (d["coeffs"] != 0)).values
         absc = np.abs(d["coeffs"].values)
+        live = ((d["labels"] != -1) & (d["vars"] != -1)).values & (absc >= ZERO_TOL)
         cls_of = label_cls[d["vars"].values]
         for i, cls in enumerate(_CLASSES):
             vals = absc[live & (cls_of == i)]
@@ -189,9 +190,9 @@ def _quantities(
 
 
 def _magnitudes(v: np.ndarray) -> np.ndarray:
-    """Finite nonzero |v|."""
+    """Finite |v| above the noise floor `ZERO_TOL`."""
     v = np.abs(v)
-    return v[np.isfinite(v) & (v != 0)]
+    return v[np.isfinite(v) & (v >= ZERO_TOL)]
 
 
 def _row_units(ranges: Ranges, names: list[str]) -> list[ColumnClass]:

@@ -120,7 +120,7 @@ def test_scaling_exception_safety(request, network):
     """A solve failure leaves inputs and model data untouched, factors set."""
     n = request.getfixturevalue(network)
     before = n.c.generators.static["capital_cost"].copy()
-    n.optimize.create_model(scaling=True)
+    n.optimize.create_model(scaling={"energy": 8.0, "cost": 4.0})
     coeffs = {k: c.data["coeffs"].copy() for k, c in n.model.constraints.items()}
     with (
         _solve_fails_on(n.model),
@@ -950,3 +950,24 @@ def test_scaling_units_keep_coefficients(ac_dc_network):
     apply_factors(m, factors)
     assert float(m.constraints["Bus-nodal_balance"].scaling.max()) == 1 / 512
     assert float(m.variables["Generator-p"].scaling.max()) == 1 / 512
+
+
+@pytest.mark.parametrize("noise_rhs", [False, True], ids=["plain", "noise_rhs"])
+def test_choose_factors_keeps_tie_break_costs(noise_rhs):
+    """Tie-break costs and rhs noise inside the window leave the units alone."""
+    import pypsa
+    from pypsa.optimization.scaling import choose_factors
+
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+    n.add("Bus", "b")
+    n.add("Load", "l", bus="b", p_set=[100, 300, 150])
+    n.add("Generator", "g", bus="b", p_nom_extendable=True, capital_cost=5e4)
+    n.generators.marginal_cost = 1e-2
+    n.add("Store", "s", bus="b", e_nom=500, marginal_cost_storage=1e-3)
+    n.optimize.create_model(include_objective_constant=False)
+    if noise_rhs:
+        p = n.model.variables["Generator-p"]
+        n.model.add_constraints(p >= 2e-18, name="noise")
+    factors = choose_factors(n.model, constraint_factors=False)
+    assert (factors.energy, factors.cost) == (1.0, 1.0)
